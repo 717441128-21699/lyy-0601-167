@@ -91,8 +91,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   fetchTasks: () => {
     set({ isLoading: true });
     setTimeout(() => {
-      const tasks = generateMockTasks();
-      set({ tasks, isLoading: false });
+      const currentTasks = get().tasks;
+      if (currentTasks.length === 0) {
+        const tasks = generateMockTasks();
+        set({ tasks, isLoading: false });
+      } else {
+        set({ isLoading: false });
+      }
     }, 300);
   },
 
@@ -423,6 +428,18 @@ export const useWarningStore = create<WarningStore>((set, get) => ({
         unreadCount: Math.max(0, state.unreadCount - 1),
       };
     });
+
+    const updatedWarning = get().warnings.find(w => w.id === warningId);
+    if (updatedWarning) {
+      const taskStore = useTaskStore.getState();
+      const task = taskStore.tasks.find(t => t.warnings.some(w => w.id === warningId));
+      if (task) {
+        const updatedTaskWarnings = task.warnings.map(w =>
+          w.id === warningId ? updatedWarning : w
+        );
+        taskStore.updateTask(task.id, { warnings: updatedTaskWarnings });
+      }
+    }
   },
 
   markAsRead: (warningId) => {
@@ -514,7 +531,9 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
     const task = useTaskStore.getState().getTask(taskId);
     if (!task || !task.results) return;
 
-    const baselinePeak = task.results.peakInfection * 0.85;
+    const baselinePeak = task.results.totalInfected > 0
+      ? task.results.totalInfected * 0.1
+      : task.results.peakInfection * 0.7;
     const currentPeak = task.results.peakInfection;
     const deviation = Math.abs(currentPeak - baselinePeak) / baselinePeak;
 
@@ -540,6 +559,17 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
             consecutivePeakDeviations: newCount,
             peakDeviationHistory: newHistory,
             lastPeakDeviation: deviation,
+          },
+        }));
+      }
+    } else {
+      if (get().systemStatus.consecutivePeakDeviations > 0) {
+        set((state) => ({
+          systemStatus: {
+            ...state.systemStatus,
+            consecutivePeakDeviations: 0,
+            peakDeviationHistory: [],
+            lastPeakDeviation: undefined,
           },
         }));
       }

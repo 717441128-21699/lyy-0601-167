@@ -9,25 +9,43 @@ import {
   Filter,
   Search,
   ChevronRight,
+  Send,
 } from 'lucide-react';
-import { useTaskStore } from '../../store';
+import { useTaskStore, useSystemStore } from '../../store';
 import { Card } from '../../components/ui/StatusBadge';
 import { motion } from 'framer-motion';
 import jsPDF from 'jspdf';
 
 export default function Reports() {
-  const { tasks } = useTaskStore();
+  const { tasks, submitForApproval } = useTaskStore();
+  const { showNotification } = useSystemStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [exportFormat, setExportFormat] = useState<'pdf' | 'csv' | 'json'>('pdf');
   const [exportDimension, setExportDimension] = useState<'city' | 'time'>('time');
 
   const completedTasks = tasks.filter(
-    (t) => t.status === 'completed' && t.approvalStatus === 'level2_approved'
+    (t) => t.status === 'completed'
   );
 
   const filteredTasks = completedTasks.filter((task) =>
     task.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const getApprovalBadge = (status: string) => {
+    switch (status) {
+      case 'not_submitted': return { text: '待提交审批', color: 'bg-slate-500/20 text-slate-400' };
+      case 'pending': return { text: '待一级审批', color: 'bg-yellow-500/20 text-yellow-400' };
+      case 'level1_approved': return { text: '待二级审批', color: 'bg-blue-500/20 text-blue-400' };
+      case 'level2_approved': return { text: '已审批', color: 'bg-emerald-500/20 text-emerald-400' };
+      case 'rejected': return { text: '已驳回', color: 'bg-red-500/20 text-red-400' };
+      default: return { text: '未知', color: 'bg-slate-500/20 text-slate-400' };
+    }
+  };
+
+  const handleSubmitApproval = (taskId: string) => {
+    submitForApproval(taskId);
+    showNotification('success', '已提交审批，请前往审批中心查看');
+  };
 
   const generateCityDailyData = (task: typeof tasks[0]) => {
     if (!task.results) return {};
@@ -439,8 +457,8 @@ export default function Reports() {
               >
                 <div className="h-40 bg-gradient-to-br from-cyan-500/20 to-blue-600/20 relative flex items-center justify-center">
                   <FileBarChart className="w-16 h-16 text-cyan-400/50" />
-                  <div className="absolute top-3 right-3 px-2 py-1 bg-emerald-500/20 text-emerald-400 text-xs rounded-md">
-                    已审批
+                  <div className={`absolute top-3 right-3 px-2 py-1 text-xs rounded-md ${getApprovalBadge(task.approvalStatus).color}`}>
+                    {getApprovalBadge(task.approvalStatus).text}
                   </div>
                 </div>
                 <div className="p-4">
@@ -472,6 +490,15 @@ export default function Reports() {
                       <Eye className="w-4 h-4" />
                       预览
                     </button>
+                    {(task.approvalStatus === 'not_submitted' || task.approvalStatus === 'rejected') && (
+                      <button
+                        onClick={() => handleSubmitApproval(task.id)}
+                        className="flex-1 flex items-center justify-center gap-1.5 h-9 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-colors text-sm"
+                      >
+                        <Send className="w-4 h-4" />
+                        提交审批
+                      </button>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -480,7 +507,7 @@ export default function Reports() {
             <div className="col-span-full text-center py-16 text-slate-500">
               <FileSpreadsheet className="w-16 h-16 mx-auto mb-4 opacity-30" />
               <p className="text-lg">暂无已完成的报告</p>
-              <p className="text-sm mt-1">完成模拟并通过审批后，报告将在此展示</p>
+              <p className="text-sm mt-1">完成模拟后，报告将在此展示</p>
             </div>
           )}
         </div>

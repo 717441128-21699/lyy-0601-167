@@ -27,7 +27,9 @@ export default function Approvals() {
   const [filter, setFilter] = useState<'pending' | 'level1_approved' | 'approved' | 'rejected' | 'all'>('pending');
 
   useEffect(() => {
-    fetchTasks();
+    if (tasks.length === 0) {
+      fetchTasks();
+    }
   }, []);
 
   const filteredTasks = tasks.filter((task) => {

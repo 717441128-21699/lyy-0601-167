@@ -18,6 +18,9 @@ import {
   Send,
   CheckCircle,
   Radio,
+  ChevronDown,
+  ChevronUp,
+  MapPin,
 } from 'lucide-react';
 import { useTaskStore, useSystemStore } from '../../store';
 import { Card, StatusBadge } from '../../components/ui/StatusBadge';
@@ -35,6 +38,8 @@ export default function TaskDetail() {
   const { showNotification } = useSystemStore();
   const [task, setTask] = useState(getTask(id || ''));
   const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'warnings' | 'logs'>('overview');
+  const [showCities, setShowCities] = useState(false);
+  const [showEdges, setShowEdges] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -404,7 +409,7 @@ export default function TaskDetail() {
             </div>
           </Card>
 
-          <Card title="人口数据" subtitle="人口流动网络信息">
+          <Card title="人口数据" subtitle="人口流动网络信息" className="lg:col-span-2">
             <div className="space-y-3">
               <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
                 <span className="text-slate-400">覆盖城市数</span>
@@ -422,6 +427,68 @@ export default function TaskDetail() {
                 <span className="text-slate-400">初始感染人数</span>
                 <span className="text-red-400 font-medium">{task.population.initialInfected}</span>
               </div>
+
+              <button
+                onClick={() => setShowCities(!showCities)}
+                className="w-full flex items-center justify-between p-3 bg-slate-800/50 rounded-lg hover:bg-slate-700/50 transition-colors"
+              >
+                <span className="text-cyan-400 font-medium flex items-center gap-2">
+                  <MapPin className="w-4 h-4" />
+                  城市清单
+                </span>
+                {showCities ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </button>
+              {showCities && (
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  <div className="grid grid-cols-4 gap-2 px-3 py-1.5 text-xs text-slate-500 font-medium sticky top-0 bg-slate-800">
+                    <span>城市名</span>
+                    <span>人口</span>
+                    <span>医疗容量</span>
+                    <span>坐标</span>
+                  </div>
+                  {task.networkData.cities.map((city) => (
+                    <div key={city.id} className="grid grid-cols-4 gap-2 px-3 py-2 bg-slate-900/50 rounded-lg text-sm">
+                      <span className="text-white font-medium">{city.name}</span>
+                      <span className="text-slate-300">{city.population.toLocaleString()}</span>
+                      <span className="text-slate-300">{city.medicalCapacity.toLocaleString()}</span>
+                      <span className="text-slate-500 text-xs">{city.position.lat.toFixed(1)}°N, {city.position.lng.toFixed(1)}°E</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => setShowEdges(!showEdges)}
+                className="w-full flex items-center justify-between p-3 bg-slate-800/50 rounded-lg hover:bg-slate-700/50 transition-colors"
+              >
+                <span className="text-cyan-400 font-medium flex items-center gap-2">
+                  <MapPin className="w-4 h-4" />
+                  流动路线清单
+                </span>
+                {showEdges ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </button>
+              {showEdges && (
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  <div className="grid grid-cols-4 gap-2 px-3 py-1.5 text-xs text-slate-500 font-medium sticky top-0 bg-slate-800">
+                    <span>起点</span>
+                    <span>终点</span>
+                    <span>流量</span>
+                    <span>交通方式</span>
+                  </div>
+                  {task.networkData.edges.map((edge, idx) => {
+                    const fromCity = task.networkData.cities.find(c => c.id === edge.from);
+                    const toCity = task.networkData.cities.find(c => c.id === edge.to);
+                    return (
+                      <div key={idx} className="grid grid-cols-4 gap-2 px-3 py-2 bg-slate-900/50 rounded-lg text-sm">
+                        <span className="text-white">{fromCity?.name || edge.from}</span>
+                        <span className="text-white">{toCity?.name || edge.to}</span>
+                        <span className="text-slate-300">{edge.flowRate.toLocaleString()}</span>
+                        <span className="text-slate-500">{edge.transportMode}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </Card>
 

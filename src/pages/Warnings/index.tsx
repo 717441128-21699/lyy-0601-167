@@ -18,7 +18,7 @@ import { motion } from 'framer-motion';
 
 export default function Warnings() {
   const { warnings, fetchWarnings, reviewWarning, markAsRead } = useWarningStore();
-  const { tasks, applyWarningStrategy } = useTaskStore();
+  const { tasks, applyWarningStrategy, updateTask } = useTaskStore();
   const { currentUser } = useUserStore();
   const { showNotification } = useSystemStore();
   const [selectedWarning, setSelectedWarning] = useState<string | null>(null);
@@ -50,8 +50,27 @@ export default function Warnings() {
 
     reviewWarning(warningId, result, reviewComment, currentUser?.id || 'user1');
 
+    const warning = warnings.find(w => w.id === warningId);
+    if (warning) {
+      const task = tasks.find(t => t.id === warning.taskId);
+      if (task) {
+        const updatedTaskWarnings = task.warnings.map(w =>
+          w.id === warningId
+            ? {
+                ...w,
+                reviewed: true,
+                reviewedBy: currentUser?.id || 'user1',
+                reviewedAt: new Date(),
+                reviewResult: result,
+                reviewComment: reviewComment,
+              }
+            : w
+        );
+        updateTask(task.id, { warnings: updatedTaskWarnings });
+      }
+    }
+
     if (result === 'approved') {
-      const warning = warnings.find(w => w.id === warningId);
       if (warning) {
         const strategy = {
           isolation: { enabled: true, coverage: 0.8, complianceRate: 0.9 },
