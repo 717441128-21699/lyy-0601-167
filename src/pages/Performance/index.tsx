@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   BarChart3,
   TrendingUp,
@@ -9,18 +9,24 @@ import {
   Calendar,
   ArrowUpRight,
   ArrowDownRight,
+  X,
+  Eye,
+  Link as LinkIcon,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useSystemStore, useTaskStore } from '../../store';
 import { Card, StatCard } from '../../components/ui/StatusBadge';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { mockDailyStats } from '../../data/mockData';
+import { PeakDeviationRecord } from '../../types';
 import * as echarts from 'echarts';
-import { useRef } from 'react';
 
 export default function Performance() {
   const { dailyStats, systemStatus, fetchDailyStats } = useSystemStore();
   const { tasks } = useTaskStore();
+  const navigate = useNavigate();
   const [period, setPeriod] = useState<'7d' | '30d' | '90d'>('30d');
+  const [showDeviationDetail, setShowDeviationDetail] = useState(false);
   const completionChartRef = useRef<HTMLDivElement>(null);
   const warningChartRef = useRef<HTMLDivElement>(null);
 
@@ -255,6 +261,7 @@ export default function Performance() {
           value={`${systemStatus.consecutivePeakDeviations} 次`}
           icon={<Target className="w-6 h-6" />}
           trend={{ value: 0, isPositive: true }}
+          onClick={() => setShowDeviationDetail(true)}
         />
       </div>
 
@@ -301,7 +308,22 @@ export default function Performance() {
           </div>
         </Card>
 
-        <Card title="峰值偏差监控" subtitle="连续偏差监测，超3次自动暂停" className="lg:col-span-2">
+        <Card
+          title="峰值偏差监控"
+          subtitle="连续偏差监测，超3次自动暂停"
+          className="lg:col-span-2"
+          headerAction={
+            systemStatus.peakDeviationHistory.length > 0 ? (
+              <button
+                onClick={() => setShowDeviationDetail(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 rounded-lg transition-colors"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                查看详情
+              </button>
+            ) : undefined
+          }
+        >
           <div className="flex items-center gap-3 mb-4">
             <span className="text-slate-400 text-sm">当前累计：</span>
             <span className={`text-2xl font-bold ${
@@ -317,46 +339,51 @@ export default function Performance() {
           </div>
 
           <div className="grid grid-cols-3 gap-4 mb-6">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className={`p-4 rounded-xl text-center ${
-                  i <= systemStatus.consecutivePeakDeviations
-                    ? 'bg-red-500/20 border border-red-500/30'
-                    : 'bg-slate-800/50 border border-slate-700/50'
-                }`}
-              >
+            {[1, 2, 3].map((i) => {
+              const countedRecords = systemStatus.peakDeviationHistory.filter((r: PeakDeviationRecord) => r.counted);
+              const record = countedRecords[i - 1];
+              const isTriggered = i <= systemStatus.consecutivePeakDeviations;
+              return (
                 <div
-                  className={`w-12 h-12 mx-auto rounded-full flex items-center justify-center mb-2 ${
-                    i <= systemStatus.consecutivePeakDeviations
-                      ? 'bg-red-500/30'
-                      : 'bg-slate-700/50'
+                  key={i}
+                  className={`p-4 rounded-xl text-center ${
+                    isTriggered
+                      ? 'bg-red-500/20 border border-red-500/30'
+                      : 'bg-slate-800/50 border border-slate-700/50'
                   }`}
                 >
-                  <AlertTriangle
-                    className={`w-6 h-6 ${
-                      i <= systemStatus.consecutivePeakDeviations
-                        ? 'text-red-400'
-                        : 'text-slate-600'
+                  <div
+                    className={`w-12 h-12 mx-auto rounded-full flex items-center justify-center mb-2 ${
+                      isTriggered
+                        ? 'bg-red-500/30'
+                        : 'bg-slate-700/50'
                     }`}
-                  />
+                  >
+                    <AlertTriangle
+                      className={`w-6 h-6 ${
+                        isTriggered
+                          ? 'text-red-400'
+                          : 'text-slate-600'
+                      }`}
+                    />
+                  </div>
+                  <p className="text-white font-medium">第 {i} 次</p>
+                  <p
+                    className={`text-xs mt-1 ${
+                      isTriggered
+                        ? 'text-red-400'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    {isTriggered
+                      ? record
+                        ? `${record.taskName} · 偏差 ${(record.deviationRatio * 100).toFixed(1)}%`
+                        : '已触发'
+                      : '正常'}
+                  </p>
                 </div>
-                <p className="text-white font-medium">第 {i} 次</p>
-                <p
-                  className={`text-xs mt-1 ${
-                    i <= systemStatus.consecutivePeakDeviations
-                      ? 'text-red-400'
-                      : 'text-slate-500'
-                  }`}
-                >
-                  {i <= systemStatus.consecutivePeakDeviations
-                    ? systemStatus.peakDeviationHistory[i - 1] !== undefined
-                      ? `偏差 ${(systemStatus.peakDeviationHistory[i - 1] * 100).toFixed(1)}%`
-                      : '已触发'
-                    : '正常'}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="p-4 bg-slate-900/50 rounded-lg">
@@ -367,6 +394,111 @@ export default function Performance() {
           </div>
         </Card>
       </div>
+
+      <AnimatePresence>
+        {showDeviationDetail && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-end"
+            onClick={() => setShowDeviationDetail(false)}
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="relative w-full max-w-3xl h-full bg-slate-900 border-l border-slate-700/50 overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700/50">
+                <div>
+                  <h2 className="text-lg font-bold text-white">峰值偏差记录</h2>
+                  <p className="text-slate-400 text-sm mt-0.5">
+                    共 {systemStatus.peakDeviationHistory.length} 条记录
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowDeviationDetail(false)}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="px-6 py-4">
+                {systemStatus.peakDeviationHistory.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500">
+                    暂无偏差记录
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-slate-700/50">
+                          <th className="text-left py-3 px-3 text-slate-400 text-xs font-medium uppercase tracking-wider">时间</th>
+                          <th className="text-left py-3 px-3 text-slate-400 text-xs font-medium uppercase tracking-wider">任务名称</th>
+                          <th className="text-right py-3 px-3 text-slate-400 text-xs font-medium uppercase tracking-wider">基线峰值</th>
+                          <th className="text-right py-3 px-3 text-slate-400 text-xs font-medium uppercase tracking-wider">当前峰值</th>
+                          <th className="text-right py-3 px-3 text-slate-400 text-xs font-medium uppercase tracking-wider">偏差比例</th>
+                          <th className="text-center py-3 px-3 text-slate-400 text-xs font-medium uppercase tracking-wider">计入连续</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {systemStatus.peakDeviationHistory.map((record: PeakDeviationRecord, idx: number) => (
+                          <tr
+                            key={idx}
+                            className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
+                          >
+                            <td className="py-3 px-3 text-slate-300 text-sm">
+                              {record.timestamp instanceof Date
+                                ? record.timestamp.toLocaleString('zh-CN')
+                                : new Date(record.timestamp).toLocaleString('zh-CN')}
+                            </td>
+                            <td className="py-3 px-3">
+                              <button
+                                onClick={() => navigate(`/tasks/${record.taskId}`)}
+                                className="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 text-sm transition-colors"
+                              >
+                                <LinkIcon className="w-3.5 h-3.5" />
+                                {record.taskName}
+                              </button>
+                            </td>
+                            <td className="py-3 px-3 text-slate-300 text-sm text-right">
+                              {record.baselinePeak.toLocaleString()}
+                            </td>
+                            <td className="py-3 px-3 text-slate-300 text-sm text-right">
+                              {record.currentPeak.toLocaleString()}
+                            </td>
+                            <td className={`py-3 px-3 text-sm text-right font-medium ${
+                              record.deviationRatio >= systemStatus.consecutivePeakDeviations ? 'text-red-400' : 'text-yellow-400'
+                            }`}>
+                              {(record.deviationRatio * 100).toFixed(1)}%
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              {record.counted ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400">
+                                  是
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700/50 text-slate-500">
+                                  否
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

@@ -308,6 +308,39 @@ export default function Reports() {
       doc.text('-', 80, yPos);
       doc.text(`${totalReduction}%`, 140, yPos);
       yPos += 12;
+
+      if (task.preAdjustmentSnapshot) {
+        if (yPos > 230) { doc.addPage(); yPos = 20; }
+        doc.setFontSize(14); doc.setTextColor(0);
+        doc.text('七、策略调整对比', 20, yPos);
+        yPos += 10;
+
+        doc.setFontSize(9); doc.setTextColor(0);
+        doc.text('指标', 25, yPos);
+        doc.text('调整前', 90, yPos);
+        doc.text('调整后', 140, yPos);
+        doc.text('变化', 175, yPos);
+        yPos += 2; doc.setDrawColor(150); doc.line(25, yPos, 190, yPos); yPos += 5;
+
+        doc.setTextColor(60);
+        const snap = task.preAdjustmentSnapshot;
+        const comparisons = [
+          { label: '峰值感染', before: snap.peakInfection, after: task.results.peakInfection },
+          { label: '总感染', before: snap.totalInfected, after: task.results.totalInfected },
+          { label: '总康复', before: snap.totalRecovered, after: task.results.totalRecovered },
+          { label: '总死亡', before: snap.totalDeaths, after: task.results.totalDeaths },
+        ];
+        for (const c of comparisons) {
+          if (yPos > 270) { doc.addPage(); yPos = 20; }
+          const change = c.before > 0 ? ((c.after - c.before) / c.before * 100).toFixed(1) + '%' : '-';
+          doc.text(c.label, 25, yPos);
+          doc.text(c.before.toLocaleString(), 90, yPos);
+          doc.text(c.after.toLocaleString(), 140, yPos);
+          doc.text(change, 175, yPos);
+          yPos += 7;
+        }
+        yPos += 8;
+      }
     }
 
     doc.setFontSize(10);

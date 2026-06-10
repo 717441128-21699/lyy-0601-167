@@ -88,13 +88,16 @@ interface StatCardProps {
   icon?: React.ReactNode;
   trend?: { value: number; isPositive: boolean };
   className?: string;
+  onClick?: () => void;
 }
 
-export function StatCard({ label, value, icon, trend, className }: StatCardProps) {
+export function StatCard({ label, value, icon, trend, className, onClick }: StatCardProps) {
   return (
     <div
+      onClick={onClick}
       className={cn(
         'p-5 bg-slate-800/50 border border-slate-700/50 rounded-xl backdrop-blur-sm hover:border-slate-600/50 transition-all',
+        onClick && 'cursor-pointer hover:border-cyan-500/30 hover:bg-slate-800/70',
         className
       )}
     >

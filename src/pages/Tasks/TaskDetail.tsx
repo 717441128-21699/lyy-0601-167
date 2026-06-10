@@ -21,8 +21,12 @@ import {
   ChevronDown,
   ChevronUp,
   MapPin,
+  BarChart3,
+  ArrowDown,
+  ArrowUp,
 } from 'lucide-react';
 import { useTaskStore, useSystemStore } from '../../store';
+import type { SimulationSnapshot } from '../../types';
 import { Card, StatusBadge } from '../../components/ui/StatusBadge';
 import { InfectionCurveChart } from '../../components/charts/InfectionCurveChart';
 import { R0Chart } from '../../components/charts/R0Chart';
@@ -30,6 +34,7 @@ import { ResourceGauge } from '../../components/charts/ResourceGauge';
 import { motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import jsPDF from 'jspdf';
 
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
@@ -37,7 +42,7 @@ export default function TaskDetail() {
   const { tasks, getTask, startSimulation, pauseSimulation, submitForApproval } = useTaskStore();
   const { showNotification } = useSystemStore();
   const [task, setTask] = useState(getTask(id || ''));
-  const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'warnings' | 'logs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'warnings' | 'logs' | 'comparison'>('overview');
   const [showCities, setShowCities] = useState(false);
   const [showEdges, setShowEdges] = useState(false);
 
@@ -102,6 +107,7 @@ export default function TaskDetail() {
     { id: 'params', label: '参数配置', icon: Settings2 },
     { id: 'warnings', label: '预警记录', icon: AlertTriangle },
     { id: 'logs', label: '调整日志', icon: FileText },
+    { id: 'comparison', label: '策略对比', icon: BarChart3 },
   ];
 
   return (
@@ -162,7 +168,131 @@ export default function TaskDetail() {
             重置
           </button>
           <button
-            onClick={() => {}}
+            onClick={() => {
+              const doc = new jsPDF();
+
+              doc.setFontSize(20);
+              doc.setTextColor(30, 58, 138);
+              doc.text('病毒传播模拟综合报告', 105, 25, { align: 'center' });
+
+              doc.setFontSize(12);
+              doc.setTextColor(100);
+              doc.text(task.name, 105, 35, { align: 'center' });
+
+              doc.setFontSize(14);
+              doc.setTextColor(0);
+              doc.text('一、基本信息', 20, 55);
+
+              doc.setFontSize(10);
+              doc.setTextColor(60);
+              doc.text(`任务名称: ${task.name}`, 25, 65);
+              doc.text(`创建时间: ${task.createdAt.toLocaleDateString('zh-CN')}`, 25, 73);
+              doc.text(`模拟天数: ${task.totalDays} 天`, 25, 81);
+
+              doc.setFontSize(14);
+              doc.setTextColor(0);
+              doc.text('二、病毒参数', 20, 95);
+
+              doc.setFontSize(10);
+              doc.setTextColor(60);
+              doc.text(`R0: ${task.params.r0}`, 25, 105);
+              doc.text(`潜伏期: ${task.params.incubationPeriod} 天`, 25, 113);
+              doc.text(`传染期: ${task.params.infectiousPeriod} 天`, 25, 121);
+              doc.text(`重症率: ${(task.params.severeRate * 100).toFixed(1)}%`, 25, 129);
+
+              let yPos = 145;
+
+              if (task.results) {
+                doc.setFontSize(14);
+                doc.setTextColor(0);
+                doc.text('三、模拟结果', 20, yPos);
+
+                yPos += 10;
+                doc.setFontSize(10);
+                doc.setTextColor(60);
+                doc.text(`峰值感染人数: ${task.results.peakInfection.toLocaleString()}`, 25, yPos);
+                yPos += 8;
+                doc.text(`峰值出现时间: 第 ${task.results.peakTime} 天`, 25, yPos);
+                yPos += 8;
+                doc.text(`总感染人数: ${task.results.totalInfected.toLocaleString()}`, 25, yPos);
+                yPos += 8;
+                doc.text(`总康复人数: ${task.results.totalRecovered.toLocaleString()}`, 25, yPos);
+                yPos += 8;
+                doc.text(`总死亡人数: ${task.results.totalDeaths.toLocaleString()}`, 25, yPos);
+                yPos += 16;
+              }
+
+              if (task.preAdjustmentSnapshot && task.results) {
+                if (yPos > 230) {
+                  doc.addPage();
+                  yPos = 20;
+                }
+
+                doc.setFontSize(14);
+                doc.setTextColor(0);
+                doc.text('策略调整对比', 20, yPos);
+                yPos += 10;
+
+                doc.setFontSize(9);
+                doc.setTextColor(0);
+                doc.text('指标', 25, yPos);
+                doc.text('调整前', 85, yPos);
+                doc.text('调整后', 130, yPos);
+                doc.text('变化率', 175, yPos);
+                yPos += 2;
+                doc.setDrawColor(150);
+                doc.line(25, yPos, 190, yPos);
+                yPos += 5;
+
+                const before = task.preAdjustmentSnapshot;
+                const after = task.results;
+                const rows = [
+                  {
+                    label: '峰值感染人数',
+                    beforeVal: before.peakInfection,
+                    afterVal: after.peakInfection,
+                  },
+                  {
+                    label: '总感染人数',
+                    beforeVal: before.totalInfected,
+                    afterVal: after.totalInfected,
+                  },
+                  {
+                    label: '总康复人数',
+                    beforeVal: before.totalRecovered,
+                    afterVal: after.totalRecovered,
+                  },
+                  {
+                    label: '总死亡人数',
+                    beforeVal: before.totalDeaths,
+                    afterVal: after.totalDeaths,
+                  },
+                ];
+
+                doc.setTextColor(60);
+                for (const row of rows) {
+                  if (yPos > 270) {
+                    doc.addPage();
+                    yPos = 20;
+                  }
+                  const pct = row.beforeVal > 0
+                    ? (((row.afterVal - row.beforeVal) / row.beforeVal) * 100).toFixed(1)
+                    : '0.0';
+                  doc.text(row.label, 25, yPos);
+                  doc.text(row.beforeVal.toLocaleString(), 85, yPos);
+                  doc.text(row.afterVal.toLocaleString(), 130, yPos);
+                  doc.text(`${Number(pct) >= 0 ? '+' : ''}${pct}%`, 175, yPos);
+                  yPos += 7;
+                }
+              }
+
+              doc.setFontSize(10);
+              doc.setTextColor(150);
+              doc.text('EpiSim 病毒传播动力学模拟平台 生成', 105, 280, { align: 'center' });
+
+              doc.save(`${task.name}_报告.pdf`);
+              showNotification('success', '报告已导出');
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 transition-colors"
           >
             <Download className="w-4 h-4" />
@@ -644,6 +774,234 @@ export default function TaskDetail() {
             </div>
           )}
         </Card>
+      )}
+
+      {activeTab === 'comparison' && (
+        <>
+          {task.preAdjustmentSnapshot && task.results ? (
+            <div className="space-y-6">
+              <Card title="策略调整对比视图">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <h3 className="text-slate-400 font-medium text-sm border-b border-slate-700/50 pb-2">调整前</h3>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">峰值感染人数</span>
+                      <span className="text-lg font-bold text-red-400">
+                        {task.preAdjustmentSnapshot.peakInfection.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">总感染人数</span>
+                      <span className="text-lg font-bold text-orange-400">
+                        {task.preAdjustmentSnapshot.totalInfected.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">总康复人数</span>
+                      <span className="text-lg font-bold text-emerald-400">
+                        {task.preAdjustmentSnapshot.totalRecovered.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">总死亡人数</span>
+                      <span className="text-lg font-bold text-red-400">
+                        {task.preAdjustmentSnapshot.totalDeaths.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">峰值出现时间</span>
+                      <span className="text-lg font-bold text-white">
+                        第 {task.preAdjustmentSnapshot.peakTime} 天
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-cyan-400 font-medium text-sm border-b border-cyan-500/30 pb-2">调整后</h3>
+                    {(() => {
+                      const before = task.preAdjustmentSnapshot!;
+                      const after = task.results!;
+                      const peakChange = after.peakInfection - before.peakInfection;
+                      const peakPct = before.peakInfection > 0 ? ((peakChange / before.peakInfection) * 100).toFixed(1) : '0.0';
+                      const totalChange = after.totalInfected - before.totalInfected;
+                      const totalPct = before.totalInfected > 0 ? ((totalChange / before.totalInfected) * 100).toFixed(1) : '0.0';
+                      const recoveredChange = after.totalRecovered - before.totalRecovered;
+                      const recoveredPct = before.totalRecovered > 0 ? ((recoveredChange / before.totalRecovered) * 100).toFixed(1) : '0.0';
+                      const deathsChange = after.totalDeaths - before.totalDeaths;
+                      const deathsPct = before.totalDeaths > 0 ? ((deathsChange / before.totalDeaths) * 100).toFixed(1) : '0.0';
+                      const peakTimeChange = after.peakTime - before.peakTime;
+
+                      return (
+                        <>
+                          <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                            <span className="text-slate-400">峰值感染人数</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold text-cyan-400">
+                                {after.peakInfection.toLocaleString()}
+                              </span>
+                              <span className={`flex items-center gap-0.5 text-xs font-medium ${peakChange <= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {peakChange <= 0 ? <ArrowDown className="w-3 h-3" /> : <ArrowUp className="w-3 h-3" />}
+                                {Math.abs(Number(peakPct))}%
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                            <span className="text-slate-400">总感染人数</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold text-cyan-400">
+                                {after.totalInfected.toLocaleString()}
+                              </span>
+                              <span className={`flex items-center gap-0.5 text-xs font-medium ${totalChange <= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {totalChange <= 0 ? <ArrowDown className="w-3 h-3" /> : <ArrowUp className="w-3 h-3" />}
+                                {Math.abs(Number(totalPct))}%
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                            <span className="text-slate-400">总康复人数</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold text-cyan-400">
+                                {after.totalRecovered.toLocaleString()}
+                              </span>
+                              <span className={`flex items-center gap-0.5 text-xs font-medium ${recoveredChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {recoveredChange >= 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                {Math.abs(Number(recoveredPct))}%
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                            <span className="text-slate-400">总死亡人数</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold text-cyan-400">
+                                {after.totalDeaths.toLocaleString()}
+                              </span>
+                              <span className={`flex items-center gap-0.5 text-xs font-medium ${deathsChange <= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {deathsChange <= 0 ? <ArrowDown className="w-3 h-3" /> : <ArrowUp className="w-3 h-3" />}
+                                {Math.abs(Number(deathsPct))}%
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                            <span className="text-slate-400">峰值出现时间</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold text-cyan-400">
+                                第 {after.peakTime} 天
+                              </span>
+                              <span className={`flex items-center gap-0.5 text-xs font-medium ${peakTimeChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {peakTimeChange >= 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                {Math.abs(peakTimeChange)}天
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </Card>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Card title="调整前感染曲线">
+                  <InfectionCurveChart data={task.preAdjustmentSnapshot.timeSeries} height={280} />
+                </Card>
+                <Card title="调整后感染曲线">
+                  <InfectionCurveChart data={task.results.timeSeries} height={280} />
+                </Card>
+              </div>
+
+              <Card title="干预措施对比">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {(() => {
+                    const beforeInt = task.preAdjustmentSnapshot!.interventions;
+                    const afterInt = task.interventions;
+                    const items = [
+                      {
+                        label: '社交疏离',
+                        beforeEnabled: beforeInt.socialDistancing.enabled,
+                        afterEnabled: afterInt.socialDistancing.enabled,
+                        beforeParam: `强度: ${(beforeInt.socialDistancing.intensity * 100).toFixed(0)}%`,
+                        afterParam: `强度: ${(afterInt.socialDistancing.intensity * 100).toFixed(0)}%`,
+                        changed: beforeInt.socialDistancing.enabled !== afterInt.socialDistancing.enabled ||
+                          beforeInt.socialDistancing.intensity !== afterInt.socialDistancing.intensity,
+                      },
+                      {
+                        label: '病例隔离',
+                        beforeEnabled: beforeInt.isolation.enabled,
+                        afterEnabled: afterInt.isolation.enabled,
+                        beforeParam: `覆盖: ${(beforeInt.isolation.coverage * 100).toFixed(0)}%`,
+                        afterParam: `覆盖: ${(afterInt.isolation.coverage * 100).toFixed(0)}%`,
+                        changed: beforeInt.isolation.enabled !== afterInt.isolation.enabled ||
+                          beforeInt.isolation.coverage !== afterInt.isolation.coverage,
+                      },
+                      {
+                        label: '疫苗接种',
+                        beforeEnabled: beforeInt.vaccination.enabled,
+                        afterEnabled: afterInt.vaccination.enabled,
+                        beforeParam: `${beforeInt.vaccination.dailyCapacity.toLocaleString()} 剂/天`,
+                        afterParam: `${afterInt.vaccination.dailyCapacity.toLocaleString()} 剂/天`,
+                        changed: beforeInt.vaccination.enabled !== afterInt.vaccination.enabled ||
+                          beforeInt.vaccination.dailyCapacity !== afterInt.vaccination.dailyCapacity,
+                      },
+                      {
+                        label: '旅行限制',
+                        beforeEnabled: beforeInt.travelRestriction.enabled,
+                        afterEnabled: afterInt.travelRestriction.enabled,
+                        beforeParam: `等级: ${(beforeInt.travelRestriction.restrictionLevel * 100).toFixed(0)}%`,
+                        afterParam: `等级: ${(afterInt.travelRestriction.restrictionLevel * 100).toFixed(0)}%`,
+                        changed: beforeInt.travelRestriction.enabled !== afterInt.travelRestriction.enabled ||
+                          beforeInt.travelRestriction.restrictionLevel !== afterInt.travelRestriction.restrictionLevel,
+                      },
+                    ];
+                    return items.map((item) => (
+                      <div
+                        key={item.label}
+                        className={`p-4 rounded-lg border ${
+                          item.changed
+                            ? 'bg-cyan-500/10 border-cyan-500/30'
+                            : 'bg-slate-800/50 border-slate-700/50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <Shield className={`w-4 h-4 ${item.changed ? 'text-cyan-400' : 'text-slate-500'}`} />
+                          <span className="text-white font-medium text-sm">{item.label}</span>
+                          {item.changed && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">已变更</span>
+                          )}
+                        </div>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500">调整前</span>
+                            <span className={item.beforeEnabled ? 'text-emerald-400' : 'text-slate-500'}>
+                              {item.beforeEnabled ? '已启用' : '未启用'}
+                            </span>
+                          </div>
+                          <div className="text-slate-400 pl-2">{item.beforeParam}</div>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-slate-500">调整后</span>
+                            <span className={item.afterEnabled ? 'text-emerald-400' : 'text-slate-500'}>
+                              {item.afterEnabled ? '已启用' : '未启用'}
+                            </span>
+                          </div>
+                          <div className={`${item.changed ? 'text-cyan-300' : 'text-slate-400'} pl-2`}>
+                            {item.afterParam}
+                          </div>
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </Card>
+            </div>
+          ) : (
+            <Card>
+              <div className="text-center py-16 text-slate-500">
+                <BarChart3 className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                <p className="text-lg">暂无策略调整对比数据</p>
+                <p className="text-sm mt-1">确认预警后将自动记录调整前数据</p>
+              </div>
+            </Card>
+          )}
+        </>
       )}
     </motion.div>
   );

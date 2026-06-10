@@ -210,6 +210,7 @@ export interface SimulationTask {
   iterations: number;
   currentIteration: number;
   totalDays: number;
+  preAdjustmentSnapshot?: SimulationSnapshot;
 }
 
 export interface ThresholdConfig {
@@ -229,10 +230,32 @@ export interface DailyStats {
   peakDeviations: number[];
 }
 
+export interface PeakDeviationRecord {
+  taskId: string;
+  taskName: string;
+  baselinePeak: number;
+  currentPeak: number;
+  deviationRatio: number;
+  counted: boolean;
+  timestamp: Date;
+}
+
+export interface SimulationSnapshot {
+  timeSeries: TimePoint[];
+  peakInfection: number;
+  peakTime: number;
+  totalInfected: number;
+  totalRecovered: number;
+  totalDeaths: number;
+  r0Evolution: number[];
+  medicalResourceUsage: number[];
+  interventions: InterventionConfig;
+}
+
 export interface SystemStatus {
   isPaused: boolean;
   pauseReason?: string;
   consecutivePeakDeviations: number;
   lastPeakDeviation?: number;
-  peakDeviationHistory: number[];
+  peakDeviationHistory: PeakDeviationRecord[];
 }

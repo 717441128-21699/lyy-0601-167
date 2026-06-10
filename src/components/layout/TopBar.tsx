@@ -34,7 +34,7 @@ export function TopBar() {
           {systemStatus.isPaused && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 border border-red-500/30 rounded-lg">
               <AlertOctagon className="w-4 h-4 text-red-400 animate-pulse" />
-              <span className="text-red-400 text-sm font-medium">系统已暂停</span>
+              <span className="text-red-400 text-sm font-medium">系统已暂停{systemStatus.pauseReason ? `：${systemStatus.pauseReason.length > 30 ? systemStatus.pauseReason.slice(0, 30) + '...' : systemStatus.pauseReason}` : ''}</span>
             </div>
           )}
 
@@ -93,7 +93,7 @@ export function TopBar() {
           {systemStatus.consecutivePeakDeviations > 0 && !systemStatus.isPaused && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
               <AlertOctagon className="w-4 h-4 text-yellow-400" />
-              <span className="text-yellow-400 text-sm font-medium">偏差 {systemStatus.consecutivePeakDeviations}/3</span>
+              <span className="text-yellow-400 text-sm font-medium">偏差 {systemStatus.consecutivePeakDeviations}/3{systemStatus.lastPeakDeviation != null ? ` (${(systemStatus.lastPeakDeviation * 100).toFixed(1)}%)` : ''}</span>
             </div>
           )}
         </div>

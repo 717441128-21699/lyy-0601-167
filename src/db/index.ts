@@ -1,10 +1,10 @@
 import Dexie, { Table } from 'dexie';
-import { SimulationTask, WarningRecord, SystemStatus } from '../types';
+import { SimulationTask, WarningRecord, SystemStatus, PeakDeviationRecord } from '../types';
 
 export interface PersistedSystemStatus extends Omit<SystemStatus, 'peakDeviationHistory'> {
   baselinePeaks: Record<string, number>;
   lastPeakDeviation?: number;
-  peakDeviationHistory: number[];
+  peakDeviationHistory: PeakDeviationRecord[];
 }
 
 class EpisimDatabase extends Dexie {
@@ -102,7 +102,10 @@ export const saveSystemStatus = async (status: SystemStatus, baselinePeaks: Reco
       pauseReason: status.pauseReason,
       consecutivePeakDeviations: status.consecutivePeakDeviations,
       lastPeakDeviation: status.lastPeakDeviation,
-      peakDeviationHistory: status.peakDeviationHistory,
+      peakDeviationHistory: status.peakDeviationHistory.map(r => ({
+        ...r,
+        timestamp: new Date(r.timestamp),
+      })),
       baselinePeaks,
     };
     await db.systemStatus.put(persisted, SYSTEM_STATUS_KEY);
@@ -115,7 +118,14 @@ export const loadSystemStatus = async (): Promise<{ status: SystemStatus; baseli
   try {
     const row = await db.systemStatus.get(SYSTEM_STATUS_KEY);
     if (row) {
-      const { baselinePeaks, ...status } = row;
+      const { baselinePeaks, ...rest } = row;
+      const status: SystemStatus = {
+        ...rest,
+        peakDeviationHistory: (rest.peakDeviationHistory || []).map((r: PeakDeviationRecord) => ({
+          ...r,
+          timestamp: new Date(r.timestamp),
+        })),
+      };
       return { status, baselinePeaks };
     }
   } catch (e) {

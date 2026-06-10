@@ -9,6 +9,8 @@ import {
   SystemStatus,
   StrategyRecommendation,
   AdjustmentLog,
+  PeakDeviationRecord,
+  SimulationSnapshot,
 } from '../types';
 import { generateMockTasks, mockUsers, mockDailyStats, mockNetworkData } from '../data/mockData';
 import { DEFAULT_THRESHOLDS, DEFAULT_VIRUS_PARAMS, DEFAULT_INTERVENTIONS, DEFAULT_POPULATION } from '../constants';
@@ -384,13 +386,25 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const task = get().getTask(taskId);
     if (!task) return;
 
+    const snapshot: SimulationSnapshot | undefined = task.results ? {
+      timeSeries: task.results.timeSeries,
+      peakInfection: task.results.peakInfection,
+      peakTime: task.results.peakTime,
+      totalInfected: task.results.totalInfected,
+      totalRecovered: task.results.totalRecovered,
+      totalDeaths: task.results.totalDeaths,
+      r0Evolution: task.results.r0Evolution,
+      medicalResourceUsage: task.results.medicalResourceUsage,
+      interventions: { ...task.interventions },
+    } : undefined;
+
     const adjustmentLog: AdjustmentLog = {
       id: uuidv4(),
       taskId,
       timestamp: new Date(),
       adjustedBy: 'system',
       adjustmentType: '预警复核自动调整',
-      oldValue: '',
+      oldValue: snapshot ? `峰值:${snapshot.peakInfection},总感染:${snapshot.totalInfected}` : '',
       newValue: JSON.stringify(strategy),
       reason: '预警复核确认后自动生成防控方案',
     };
@@ -421,6 +435,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
               ...t,
               interventions: updatedInterventions,
               adjustmentLogs: [...t.adjustmentLogs, adjustmentLog],
+              preAdjustmentSnapshot: snapshot,
               status: 'iterating' as TaskStatus,
               currentIteration: 0,
             }
@@ -431,6 +446,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             ...state.currentTask,
             interventions: updatedInterventions,
             adjustmentLogs: [...state.currentTask.adjustmentLogs, adjustmentLog],
+            preAdjustmentSnapshot: snapshot,
             status: 'iterating' as TaskStatus,
             currentIteration: 0,
           }
@@ -610,9 +626,19 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
     const deviation = baseline > 0 ? Math.abs(peak - baseline) / baseline : 0;
     const threshold = get().thresholds.peakDeviation;
 
+    const record: PeakDeviationRecord = {
+      taskId,
+      taskName: task.name,
+      baselinePeak: baseline,
+      currentPeak: peak,
+      deviationRatio: deviation,
+      counted: deviation >= threshold,
+      timestamp: new Date(),
+    };
+
     if (deviation >= threshold) {
       const newCount = get().systemStatus.consecutivePeakDeviations + 1;
-      const newHistory = [...get().systemStatus.peakDeviationHistory, deviation];
+      const newHistory = [...get().systemStatus.peakDeviationHistory, record];
 
       if (newCount >= 3) {
         set((state) => ({
@@ -640,11 +666,12 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
       setTimeout(() => _persistAll(), 0);
     } else {
       if (get().systemStatus.consecutivePeakDeviations > 0) {
+        const newHistory = [...get().systemStatus.peakDeviationHistory, record];
         set((state) => ({
           systemStatus: {
             ...state.systemStatus,
             consecutivePeakDeviations: 0,
-            peakDeviationHistory: [],
+            peakDeviationHistory: newHistory,
             lastPeakDeviation: undefined,
           },
         }));
