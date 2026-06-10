@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
-import { useTaskStore, useUserStore } from './store';
+import { useTaskStore, useUserStore, useWarningStore, useSystemStore, initializeStores } from './store';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Tasks from './pages/Tasks';
@@ -13,6 +14,27 @@ import Reports from './pages/Reports';
 import Approvals from './pages/Approvals';
 import Performance from './pages/Performance';
 import Settings from './pages/Settings';
+import { loadSystemStatus } from './db';
+
+function useDataInitializer() {
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { status, baselinePeaks } = await loadSystemStatus();
+      useSystemStore.setState({ systemStatus: status });
+      useTaskStore.setState({ baselinePeaks });
+      await useTaskStore.getState().fetchTasks();
+      await useWarningStore.getState().fetchWarnings();
+      useSystemStore.getState().fetchDailyStats();
+      if (mounted) setInitialized(true);
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  return initialized;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useUserStore();
@@ -46,6 +68,7 @@ function MonitorWrapper() {
 export default function App() {
   return (
     <Router>
+      <DataLoader />
       <Routes>
         <Route path="/login" element={<Login />} />
         
@@ -207,4 +230,9 @@ export default function App() {
       </Routes>
     </Router>
   );
+}
+
+function DataLoader() {
+  useDataInitializer();
+  return null;
 }

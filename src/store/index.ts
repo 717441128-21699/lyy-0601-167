@@ -16,16 +16,25 @@ import { v4 as uuidv4 } from 'uuid';
 import { runSimulation } from '../engine/SEIR';
 import { WarningDetector } from '../engine/warning';
 import { generateStrategyRecommendations } from '../engine/strategy';
+import {
+  saveTasks,
+  loadTasks,
+  saveWarnings,
+  loadWarnings,
+  saveSystemStatus,
+  loadSystemStatus,
+} from '../db';
 
 interface TaskStore {
   tasks: SimulationTask[];
   currentTask: SimulationTask | null;
   isLoading: boolean;
   error: string | null;
+  baselinePeaks: Record<string, number>;
 
-  fetchTasks: () => void;
+  fetchTasks: () => Promise<void>;
   getTask: (id: string) => SimulationTask | undefined;
-  createTask: (data: Partial<SimulationTask>) => SimulationTask;
+  createTask: (data: Partial<SimulationTask>) => SimulationTask | null;
   updateTask: (id: string, updates: Partial<SimulationTask>) => void;
   deleteTask: (id: string) => void;
   setCurrentTask: (task: SimulationTask | null) => void;
@@ -43,17 +52,20 @@ interface TaskStore {
   strategies: StrategyRecommendation[];
   generateStrategies: (taskId: string) => void;
   applyWarningStrategy: (taskId: string, warningId: string, strategy: Record<string, unknown>) => void;
+
+  persist: () => void;
 }
 
 interface WarningStore {
   warnings: WarningRecord[];
   unreadCount: number;
 
-  fetchWarnings: (taskId?: string) => void;
+  fetchWarnings: (taskId?: string) => Promise<void>;
   addWarnings: (warnings: WarningRecord[]) => void;
   reviewWarning: (warningId: string, result: 'approved' | 'rejected', comment: string, reviewer: string) => void;
   markAsRead: (warningId: string) => void;
   markAllAsRead: () => void;
+  persist: () => void;
 }
 
 interface UserStore {
@@ -79,7 +91,28 @@ interface SystemStore {
   showNotification: (type: 'success' | 'error' | 'warning' | 'info', message: string) => void;
   hideNotification: () => void;
   checkPeakDeviation: (taskId: string) => void;
+  persist: () => void;
 }
+
+const _persistAll = () => {
+  try {
+    const taskState = useTaskStore.getState();
+    const warnState = useWarningStore.getState();
+    const sysState = useSystemStore.getState();
+    saveTasks(taskState.tasks);
+    saveWarnings(warnState.warnings);
+    saveSystemStatus(sysState.systemStatus, taskState.baselinePeaks);
+  } catch (e) {
+    console.error('persist error:', e);
+  }
+};
+
+const withPersist = <T extends (...args: any[]) => any>(fn: T) =>
+  ((...args: Parameters<T>) => {
+    const r = fn(...args);
+    setTimeout(_persistAll, 0);
+    return r;
+  }) as T;
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: [],
@@ -87,28 +120,31 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   isLoading: false,
   error: null,
   strategies: [],
+  baselinePeaks: {},
 
-  fetchTasks: () => {
+  fetchTasks: async () => {
     set({ isLoading: true });
-    setTimeout(() => {
-      const currentTasks = get().tasks;
-      if (currentTasks.length === 0) {
-        const tasks = generateMockTasks();
-        set({ tasks, isLoading: false });
-      } else {
-        set({ isLoading: false });
+    try {
+      let tasks = await loadTasks();
+      if (tasks.length === 0) {
+        tasks = generateMockTasks();
+        await saveTasks(tasks);
       }
-    }, 300);
+      set({ tasks, isLoading: false });
+    } catch (e) {
+      const tasks = generateMockTasks();
+      set({ tasks, isLoading: false });
+    }
   },
 
   getTask: (id: string) => {
     return get().tasks.find(t => t.id === id);
   },
 
-  createTask: (data) => {
+  createTask: withPersist((data) => {
     if (useSystemStore.getState().systemStatus.isPaused) {
       useSystemStore.getState().showNotification('error', '系统已暂停，无法创建新任务');
-      return null as any;
+      return null;
     }
 
     const newTask: SimulationTask = {
@@ -137,9 +173,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }));
 
     return newTask;
-  },
+  }),
 
-  updateTask: (id, updates) => {
+  updateTask: withPersist((id, updates) => {
     set((state) => ({
       tasks: state.tasks.map((t) =>
         t.id === id ? { ...t, ...updates, updatedAt: new Date() } : t
@@ -148,14 +184,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         ? { ...state.currentTask, ...updates, updatedAt: new Date() }
         : state.currentTask,
     }));
-  },
+  }),
 
-  deleteTask: (id) => {
+  deleteTask: withPersist((id) => {
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== id),
       currentTask: state.currentTask?.id === id ? null : state.currentTask,
+      baselinePeaks: Object.fromEntries(Object.entries(state.baselinePeaks).filter(([k]) => k !== id)),
     }));
-  },
+  }),
 
   setCurrentTask: (task) => {
     set({ currentTask: task });
@@ -243,19 +280,19 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }, 1500);
   },
 
-  pauseSimulation: (taskId) => {
+  pauseSimulation: withPersist((taskId) => {
     get().updateTask(taskId, { status: 'model_building' });
-  },
+  }),
 
-  rollbackTask: (taskId, reason) => {
+  rollbackTask: withPersist((taskId, reason) => {
     get().updateTask(taskId, { status: 'rollback' });
-  },
+  }),
 
-  submitForApproval: (taskId) => {
+  submitForApproval: withPersist((taskId) => {
     get().updateTask(taskId, { approvalStatus: 'pending' });
-  },
+  }),
 
-  approveTask: (taskId, level, approver, comment) => {
+  approveTask: withPersist((taskId, level, approver, comment) => {
     const task = get().getTask(taskId);
     if (!task) return;
 
@@ -286,10 +323,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             }
           : t
       ),
+      currentTask: state.currentTask?.id === taskId
+        ? {
+            ...state.currentTask,
+            approvalStatus: newStatus,
+            approvalHistory: [...state.currentTask.approvalHistory, approvalRecord],
+          }
+        : state.currentTask,
     }));
-  },
+  }),
 
-  rejectTask: (taskId, level, approver, comment) => {
+  rejectTask: withPersist((taskId, level, approver, comment) => {
     const approvalRecord = {
       id: uuidv4(),
       taskId,
@@ -311,8 +355,16 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             }
           : t
       ),
+      currentTask: state.currentTask?.id === taskId
+        ? {
+            ...state.currentTask,
+            status: 'completed',
+            approvalStatus: 'rejected',
+            approvalHistory: [...state.currentTask.approvalHistory, approvalRecord],
+          }
+        : state.currentTask,
     }));
-  },
+  }),
 
   generateStrategies: (taskId) => {
     const task = get().getTask(taskId);
@@ -328,7 +380,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set({ strategies });
   },
 
-  applyWarningStrategy: (taskId, warningId, strategy) => {
+  applyWarningStrategy: withPersist((taskId, warningId, strategy) => {
     const task = get().getTask(taskId);
     if (!task) return;
 
@@ -386,29 +438,35 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }));
 
     get().startSimulation(taskId);
-  },
+  }),
+
+  persist: _persistAll,
 }));
 
 export const useWarningStore = create<WarningStore>((set, get) => ({
   warnings: [],
   unreadCount: 0,
 
-  fetchWarnings: (taskId) => {
-    const allWarnings = useTaskStore.getState().tasks.flatMap((t) => t.warnings);
+  fetchWarnings: async (taskId) => {
+    let allWarnings = await loadWarnings();
+    if (allWarnings.length === 0) {
+      allWarnings = useTaskStore.getState().tasks.flatMap((t) => t.warnings);
+      if (allWarnings.length > 0) await saveWarnings(allWarnings);
+    }
     set({
       warnings: taskId ? allWarnings.filter((w) => w.taskId === taskId) : allWarnings,
       unreadCount: allWarnings.filter((w) => !w.reviewed).length,
     });
   },
 
-  addWarnings: (newWarnings: WarningRecord[]) => {
+  addWarnings: withPersist((newWarnings: WarningRecord[]) => {
     set((state) => ({
       warnings: [...state.warnings, ...newWarnings],
       unreadCount: state.unreadCount + newWarnings.filter((w) => !w.reviewed).length,
     }));
-  },
+  }),
 
-  reviewWarning: (warningId, result, comment, reviewer) => {
+  reviewWarning: withPersist((warningId, result, comment, reviewer) => {
     set((state) => {
       const updatedWarnings = state.warnings.map((w) =>
         w.id === warningId
@@ -423,40 +481,42 @@ export const useWarningStore = create<WarningStore>((set, get) => ({
           : w
       );
 
+      const updatedWarning = updatedWarnings.find(w => w.id === warningId);
+      if (updatedWarning) {
+        const taskStore = useTaskStore.getState();
+        const task = taskStore.tasks.find(t => t.warnings.some(w => w.id === warningId));
+        if (task) {
+          const updatedTaskWarnings = task.warnings.map(w =>
+            w.id === warningId ? updatedWarning : w
+          );
+          taskStore.updateTask(task.id, { warnings: updatedTaskWarnings });
+        }
+      }
+
       return {
         warnings: updatedWarnings,
         unreadCount: Math.max(0, state.unreadCount - 1),
       };
     });
+  }),
 
-    const updatedWarning = get().warnings.find(w => w.id === warningId);
-    if (updatedWarning) {
-      const taskStore = useTaskStore.getState();
-      const task = taskStore.tasks.find(t => t.warnings.some(w => w.id === warningId));
-      if (task) {
-        const updatedTaskWarnings = task.warnings.map(w =>
-          w.id === warningId ? updatedWarning : w
-        );
-        taskStore.updateTask(task.id, { warnings: updatedTaskWarnings });
-      }
-    }
-  },
-
-  markAsRead: (warningId) => {
+  markAsRead: withPersist((warningId) => {
     set((state) => ({
       warnings: state.warnings.map((w) =>
         w.id === warningId ? { ...w, reviewed: true } : w
       ),
       unreadCount: Math.max(0, state.unreadCount - 1),
     }));
-  },
+  }),
 
-  markAllAsRead: () => {
+  markAllAsRead: withPersist(() => {
     set((state) => ({
       warnings: state.warnings.map((w) => ({ ...w, reviewed: true })),
       unreadCount: 0,
     }));
-  },
+  }),
+
+  persist: _persistAll,
 }));
 
 export const useUserStore = create<UserStore>((set) => ({
@@ -504,17 +564,19 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
     set({ dailyStats: mockDailyStats });
   },
 
-  pauseSystem: (reason) => {
+  pauseSystem: withPersist((reason) => {
     set((state) => ({
       systemStatus: { ...state.systemStatus, isPaused: true, pauseReason: reason },
     }));
-  },
+  }),
 
-  resumeSystem: () => {
+  resumeSystem: withPersist(() => {
     set((state) => ({
       systemStatus: { ...state.systemStatus, isPaused: false, pauseReason: undefined, consecutivePeakDeviations: 0, peakDeviationHistory: [], lastPeakDeviation: undefined },
     }));
-  },
+    const taskState = useTaskStore.getState();
+    taskState.baselinePeaks = {};
+  }),
 
   showNotification: (type, message) => {
     set({ notification: { type, message } });
@@ -531,13 +593,24 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
     const task = useTaskStore.getState().getTask(taskId);
     if (!task || !task.results) return;
 
-    const baselinePeak = task.results.totalInfected > 0
-      ? task.results.totalInfected * 0.1
-      : task.results.peakInfection * 0.7;
-    const currentPeak = task.results.peakInfection;
-    const deviation = Math.abs(currentPeak - baselinePeak) / baselinePeak;
+    const peak = task.results.peakInfection;
+    const baselinePeaks = useTaskStore.getState().baselinePeaks;
+    let baseline: number;
 
-    if (deviation >= get().thresholds.peakDeviation) {
+    if (baselinePeaks[taskId]) {
+      baseline = baselinePeaks[taskId];
+    } else {
+      baseline = peak;
+      useTaskStore.setState((state) => ({
+        baselinePeaks: { ...state.baselinePeaks, [taskId]: peak },
+      }));
+      setTimeout(() => _persistAll(), 0);
+    }
+
+    const deviation = baseline > 0 ? Math.abs(peak - baseline) / baseline : 0;
+    const threshold = get().thresholds.peakDeviation;
+
+    if (deviation >= threshold) {
       const newCount = get().systemStatus.consecutivePeakDeviations + 1;
       const newHistory = [...get().systemStatus.peakDeviationHistory, deviation];
 
@@ -550,7 +623,9 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
             lastPeakDeviation: deviation,
           },
         }));
-        get().pauseSystem('连续三次峰值偏差超过阈值，系统已自动暂停新任务受理');
+        get().pauseSystem(
+          `连续三次峰值偏差超过${(threshold * 100).toFixed(0)}%阈值（最近偏差:${(deviation * 100).toFixed(1)}%），系统已自动暂停新任务受理，请联系首席科学家处理`
+        );
         get().showNotification('error', '系统已暂停新任务，请联系首席科学家处理');
       } else {
         set((state) => ({
@@ -562,6 +637,7 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
           },
         }));
       }
+      setTimeout(() => _persistAll(), 0);
     } else {
       if (get().systemStatus.consecutivePeakDeviations > 0) {
         set((state) => ({
@@ -572,7 +648,18 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
             lastPeakDeviation: undefined,
           },
         }));
+        setTimeout(() => _persistAll(), 0);
       }
     }
   },
+
+  persist: _persistAll,
 }));
+
+export const initializeStores = async () => {
+  const { status, baselinePeaks } = await loadSystemStatus();
+  useSystemStore.setState({ systemStatus: status });
+  useTaskStore.setState({ baselinePeaks });
+  await useTaskStore.getState().fetchTasks();
+  await useWarningStore.getState().fetchWarnings();
+};
