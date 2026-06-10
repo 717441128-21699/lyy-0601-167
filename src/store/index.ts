@@ -8,6 +8,7 @@ import {
   DailyStats,
   SystemStatus,
   StrategyRecommendation,
+  AdjustmentLog,
 } from '../types';
 import { generateMockTasks, mockUsers, mockDailyStats, mockNetworkData } from '../data/mockData';
 import { DEFAULT_THRESHOLDS, DEFAULT_VIRUS_PARAMS, DEFAULT_INTERVENTIONS, DEFAULT_POPULATION } from '../constants';
@@ -41,6 +42,7 @@ interface TaskStore {
 
   strategies: StrategyRecommendation[];
   generateStrategies: (taskId: string) => void;
+  applyWarningStrategy: (taskId: string, warningId: string, strategy: Record<string, unknown>) => void;
 }
 
 interface WarningStore {
@@ -99,6 +101,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   createTask: (data) => {
+    if (useSystemStore.getState().systemStatus.isPaused) {
+      useSystemStore.getState().showNotification('error', '系统已暂停，无法创建新任务');
+      return null as any;
+    }
+
     const newTask: SimulationTask = {
       id: uuidv4(),
       name: data.name || '新模拟任务',
@@ -150,6 +157,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   startSimulation: (taskId) => {
+    if (useSystemStore.getState().systemStatus.isPaused) {
+      useSystemStore.getState().showNotification('error', '系统已暂停，无法启动模拟');
+      return;
+    }
+
     const task = get().getTask(taskId);
     if (!task) return;
 
@@ -242,6 +254,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const task = get().getTask(taskId);
     if (!task) return;
 
+    const pushedToCommandCenter = level === 2;
+    const pushedAt = level === 2 ? new Date() : undefined;
+
     const approvalRecord = {
       id: uuidv4(),
       taskId,
@@ -250,6 +265,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       approver,
       comment,
       approvedAt: new Date(),
+      pushedToCommandCenter,
+      pushedAt,
     };
 
     const newStatus = level === 2 ? 'level2_approved' : 'level1_approved';
@@ -283,7 +300,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         t.id === taskId
           ? {
               ...t,
-              status: 'iterating',
+              status: 'completed',
               approvalStatus: 'rejected',
               approvalHistory: [...t.approvalHistory, approvalRecord],
             }
@@ -304,6 +321,66 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     );
 
     set({ strategies });
+  },
+
+  applyWarningStrategy: (taskId, warningId, strategy) => {
+    const task = get().getTask(taskId);
+    if (!task) return;
+
+    const adjustmentLog: AdjustmentLog = {
+      id: uuidv4(),
+      taskId,
+      timestamp: new Date(),
+      adjustedBy: 'system',
+      adjustmentType: '预警复核自动调整',
+      oldValue: '',
+      newValue: JSON.stringify(strategy),
+      reason: '预警复核确认后自动生成防控方案',
+    };
+
+    const updatedInterventions = {
+      ...task.interventions,
+      isolation: {
+        ...task.interventions.isolation,
+        enabled: true,
+        coverage: 0.8,
+        complianceRate: 0.9,
+        startTime: task.currentIteration,
+      },
+      vaccination: {
+        ...task.interventions.vaccination,
+        enabled: true,
+        dailyCapacity: 100000,
+        efficacy: 0.75,
+        startTime: task.currentIteration + 5,
+        priorityGroups: ['elderly', 'medical'],
+      },
+    };
+
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              interventions: updatedInterventions,
+              adjustmentLogs: [...t.adjustmentLogs, adjustmentLog],
+              status: 'iterating' as TaskStatus,
+              currentIteration: 0,
+            }
+          : t
+      ),
+      currentTask: state.currentTask?.id === taskId
+        ? {
+            ...state.currentTask,
+            interventions: updatedInterventions,
+            adjustmentLogs: [...state.currentTask.adjustmentLogs, adjustmentLog],
+            status: 'iterating' as TaskStatus,
+            currentIteration: 0,
+          }
+        : state.currentTask,
+    }));
+
+    get().startSimulation(taskId);
   },
 }));
 
@@ -396,6 +473,7 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
   systemStatus: {
     isPaused: false,
     consecutivePeakDeviations: 0,
+    peakDeviationHistory: [],
   },
   notification: null,
 
@@ -417,7 +495,7 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
 
   resumeSystem: () => {
     set((state) => ({
-      systemStatus: { ...state.systemStatus, isPaused: false, pauseReason: undefined, consecutivePeakDeviations: 0 },
+      systemStatus: { ...state.systemStatus, isPaused: false, pauseReason: undefined, consecutivePeakDeviations: 0, peakDeviationHistory: [], lastPeakDeviation: undefined },
     }));
   },
 
@@ -442,26 +520,29 @@ export const useSystemStore = create<SystemStore>((set, get) => ({
 
     if (deviation >= get().thresholds.peakDeviation) {
       const newCount = get().systemStatus.consecutivePeakDeviations + 1;
-      
+      const newHistory = [...get().systemStatus.peakDeviationHistory, deviation];
+
       if (newCount >= 3) {
-        get().pauseSystem('连续三次峰值偏差超过20%，系统已自动暂停新任务受理');
+        set((state) => ({
+          systemStatus: {
+            ...state.systemStatus,
+            consecutivePeakDeviations: newCount,
+            peakDeviationHistory: newHistory,
+            lastPeakDeviation: deviation,
+          },
+        }));
+        get().pauseSystem('连续三次峰值偏差超过阈值，系统已自动暂停新任务受理');
         get().showNotification('error', '系统已暂停新任务，请联系首席科学家处理');
       } else {
         set((state) => ({
           systemStatus: {
             ...state.systemStatus,
             consecutivePeakDeviations: newCount,
+            peakDeviationHistory: newHistory,
             lastPeakDeviation: deviation,
           },
         }));
       }
-    } else {
-      set((state) => ({
-        systemStatus: {
-          ...state.systemStatus,
-          consecutivePeakDeviations: 0,
-        },
-      }));
     }
   },
 }));

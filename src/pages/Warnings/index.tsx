@@ -18,7 +18,7 @@ import { motion } from 'framer-motion';
 
 export default function Warnings() {
   const { warnings, fetchWarnings, reviewWarning, markAsRead } = useWarningStore();
-  const { tasks } = useTaskStore();
+  const { tasks, applyWarningStrategy } = useTaskStore();
   const { currentUser } = useUserStore();
   const { showNotification } = useSystemStore();
   const [selectedWarning, setSelectedWarning] = useState<string | null>(null);
@@ -49,7 +49,21 @@ export default function Warnings() {
     }
 
     reviewWarning(warningId, result, reviewComment, currentUser?.id || 'user1');
-    showNotification('success', result === 'approved' ? '已确认预警，将生成防控方案' : '已驳回预警');
+
+    if (result === 'approved') {
+      const warning = warnings.find(w => w.id === warningId);
+      if (warning) {
+        const strategy = {
+          isolation: { enabled: true, coverage: 0.8, complianceRate: 0.9 },
+          vaccination: { enabled: true, dailyCapacity: 100000, efficacy: 0.75, priorityGroups: ['elderly', 'medical'] },
+        };
+        applyWarningStrategy(warning.taskId, warningId, strategy);
+      }
+      showNotification('success', '已确认预警，已自动生成隔离与疫苗接种方案并重新模拟');
+    } else {
+      showNotification('success', '已驳回预警');
+    }
+
     setSelectedWarning(null);
     setReviewComment('');
   };

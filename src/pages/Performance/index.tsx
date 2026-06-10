@@ -223,8 +223,10 @@ export default function Performance() {
         <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3">
           <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
           <div>
-            <p className="text-red-400 font-medium">系统已暂停</p>
-            <p className="text-slate-400 text-sm">{systemStatus.pauseReason}</p>
+            <p className="text-red-400 font-semibold text-lg">系统已暂停</p>
+            {systemStatus.pauseReason && (
+              <p className="text-red-300/80 text-sm mt-1 font-medium">{systemStatus.pauseReason}</p>
+            )}
           </div>
         </div>
       )}
@@ -300,6 +302,20 @@ export default function Performance() {
         </Card>
 
         <Card title="峰值偏差监控" subtitle="连续偏差监测，超3次自动暂停" className="lg:col-span-2">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-slate-400 text-sm">当前累计：</span>
+            <span className={`text-2xl font-bold ${
+              systemStatus.consecutivePeakDeviations >= 3
+                ? 'text-red-400'
+                : systemStatus.consecutivePeakDeviations > 0
+                  ? 'text-yellow-400'
+                  : 'text-emerald-400'
+            }`}>
+              {systemStatus.consecutivePeakDeviations}
+            </span>
+            <span className="text-slate-500 text-sm">/ 3 次</span>
+          </div>
+
           <div className="grid grid-cols-3 gap-4 mb-6">
             {[1, 2, 3].map((i) => (
               <div
@@ -333,7 +349,11 @@ export default function Performance() {
                       : 'text-slate-500'
                   }`}
                 >
-                  {i <= systemStatus.consecutivePeakDeviations ? '已触发' : '正常'}
+                  {i <= systemStatus.consecutivePeakDeviations
+                    ? systemStatus.peakDeviationHistory[i - 1] !== undefined
+                      ? `偏差 ${(systemStatus.peakDeviationHistory[i - 1] * 100).toFixed(1)}%`
+                      : '已触发'
+                    : '正常'}
                 </p>
               </div>
             ))}
@@ -342,7 +362,7 @@ export default function Performance() {
           <div className="p-4 bg-slate-900/50 rounded-lg">
             <p className="text-slate-400 text-sm">
               <Activity className="w-4 h-4 inline mr-2" />
-              系统阈值：连续3次峰值偏差超过20%时自动暂停新任务受理，并通知首席科学家介入调查。
+              系统阈值：连续3次峰值偏差超过阈值时自动暂停新任务受理，并通知首席科学家介入调查。仅手动恢复后重置计数。
             </p>
           </div>
         </Card>

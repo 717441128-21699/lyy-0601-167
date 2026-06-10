@@ -171,6 +171,8 @@ export interface ApprovalRecord {
   approver: string;
   comment: string;
   approvedAt?: Date;
+  pushedToCommandCenter?: boolean;
+  pushedAt?: Date;
 }
 
 export interface StrategyRecommendation {
@@ -232,4 +234,5 @@ export interface SystemStatus {
   pauseReason?: string;
   consecutivePeakDeviations: number;
   lastPeakDeviation?: number;
+  peakDeviationHistory: number[];
 }

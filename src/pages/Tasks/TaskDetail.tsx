@@ -15,8 +15,11 @@ import {
   Settings2,
   Shield,
   TrendingUp,
+  Send,
+  CheckCircle,
+  Radio,
 } from 'lucide-react';
-import { useTaskStore } from '../../store';
+import { useTaskStore, useSystemStore } from '../../store';
 import { Card, StatusBadge } from '../../components/ui/StatusBadge';
 import { InfectionCurveChart } from '../../components/charts/InfectionCurveChart';
 import { R0Chart } from '../../components/charts/R0Chart';
@@ -28,7 +31,8 @@ import { zhCN } from 'date-fns/locale';
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { tasks, getTask, startSimulation, pauseSimulation } = useTaskStore();
+  const { tasks, getTask, startSimulation, pauseSimulation, submitForApproval } = useTaskStore();
+  const { showNotification } = useSystemStore();
   const [task, setTask] = useState(getTask(id || ''));
   const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'warnings' | 'logs'>('overview');
 
@@ -53,6 +57,40 @@ export default function TaskDetail() {
       </div>
     );
   }
+
+  const handleSubmitForApproval = () => {
+    if (!task) return;
+    submitForApproval(task.id);
+    showNotification('success', '已提交审批，请等待审批人审核');
+  };
+
+  const getApprovalStatusDisplay = () => {
+    if (!task) return { text: '未提交', color: 'text-slate-400', level: '' };
+    switch (task.approvalStatus) {
+      case 'not_submitted':
+        return { text: '未提交', color: 'text-slate-400', level: '' };
+      case 'pending':
+        return { text: '待一级审批', color: 'text-yellow-400', level: '一级' };
+      case 'level1_approved':
+        return { text: '待二级审批', color: 'text-blue-400', level: '二级' };
+      case 'level2_approved':
+        return { text: '审批完成', color: 'text-emerald-400', level: '' };
+      case 'rejected':
+        return { text: '已驳回', color: 'text-red-400', level: '' };
+      default:
+        return { text: '未知', color: 'text-slate-400', level: '' };
+    }
+  };
+
+  const canSubmitForApproval =
+    task.status === 'completed' &&
+    (task.approvalStatus === 'not_submitted' || task.approvalStatus === 'rejected');
+
+  const isPushedToCommandCenter = task.approvalHistory.some(
+    (r) => r.pushedToCommandCenter
+  );
+
+  const approvalStatusDisplay = getApprovalStatusDisplay();
 
   const tabs = [
     { id: 'overview', label: '概览', icon: Activity },
@@ -102,6 +140,15 @@ export default function TaskDetail() {
               暂停
             </button>
           )}
+          {canSubmitForApproval && (
+            <button
+              onClick={handleSubmitForApproval}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-colors"
+            >
+              <Send className="w-4 h-4" />
+              提交审批
+            </button>
+          )}
           <button
             onClick={() => {}}
             className="flex items-center gap-2 px-4 py-2 bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors"
@@ -149,17 +196,28 @@ export default function TaskDetail() {
         </Card>
         <Card className="text-center">
           <p className="text-slate-400 text-sm">审批状态</p>
-          <p className="text-lg font-semibold text-purple-400 mt-1">
-            {task.approvalStatus === 'not_submitted' ? '未提交' : 
-             task.approvalStatus === 'pending' ? '待审批' :
-             task.approvalStatus === 'level1_approved' ? '一级通过' :
-             task.approvalStatus === 'level2_approved' ? '已完成' : '已驳回'}
+          <p className={`text-lg font-semibold mt-1 ${approvalStatusDisplay.color}`}>
+            {approvalStatusDisplay.text}
           </p>
           <p className="text-slate-500 text-xs mt-1">
             {task.approvalHistory.length} 条记录
           </p>
         </Card>
       </div>
+
+      {isPushedToCommandCenter && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+          <CheckCircle className="w-5 h-5 text-emerald-400" />
+          <span className="text-emerald-400 font-medium">已推送至指挥中心</span>
+          {task.approvalHistory.find((r) => r.pushedToCommandCenter)?.pushedAt && (
+            <span className="text-slate-400 text-sm ml-2">
+              {new Date(
+                task.approvalHistory.find((r) => r.pushedToCommandCenter)!.pushedAt!
+              ).toLocaleString('zh-CN')}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-1 border-b border-slate-700/50">
         {tabs.map((tab) => {
@@ -181,71 +239,138 @@ export default function TaskDetail() {
         })}
       </div>
 
-      {activeTab === 'overview' && task.results && (
+      {activeTab === 'overview' && (
         <div className="space-y-6">
-          <Card title="感染传播曲线">
-            <InfectionCurveChart data={task.results.timeSeries} height={350} />
-          </Card>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card title="关键指标" className="lg:col-span-1">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
-                  <span className="text-slate-400">峰值感染人数</span>
-                  <span className="text-xl font-bold text-red-400">
-                    {task.results.peakInfection.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
-                  <span className="text-slate-400">峰值出现时间</span>
-                  <span className="text-xl font-bold text-white">
-                    第 {task.results.peakTime} 天
-                  </span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
-                  <span className="text-slate-400">总感染人数</span>
-                  <span className="text-xl font-bold text-orange-400">
-                    {task.results.totalInfected.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
-                  <span className="text-slate-400">总康复人数</span>
-                  <span className="text-xl font-bold text-emerald-400">
-                    {task.results.totalRecovered.toLocaleString()}
-                  </span>
-                </div>
+          {task.approvalHistory.length > 0 && (
+            <Card title="审批历史">
+              <div className="space-y-3">
+                {task.approvalHistory.map((record) => (
+                  <div
+                    key={record.id}
+                    className={`p-4 rounded-lg border ${
+                      record.status === 'approved'
+                        ? 'bg-emerald-500/5 border-emerald-500/20'
+                        : 'bg-red-500/5 border-red-500/20'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded font-medium ${
+                            record.level === 1
+                              ? 'bg-blue-500/20 text-blue-400'
+                              : 'bg-purple-500/20 text-purple-400'
+                          }`}
+                        >
+                          {record.level === 1 ? '一级审批' : '二级审批'}
+                        </span>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded ${
+                            record.status === 'approved'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-red-500/20 text-red-400'
+                          }`}
+                        >
+                          {record.status === 'approved' ? '通过' : '驳回'}
+                        </span>
+                      </div>
+                      {record.approvedAt && (
+                        <span className="text-slate-500 text-xs">
+                          {new Date(record.approvedAt).toLocaleString('zh-CN')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <User className="w-3 h-3 text-slate-400" />
+                      <span className="text-slate-300">{record.approver}</span>
+                    </div>
+                    {record.comment && (
+                      <p className="text-slate-400 text-sm mt-2">{record.comment}</p>
+                    )}
+                    {record.pushedToCommandCenter && record.pushedAt && (
+                      <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/50">
+                        <Radio className="w-3 h-3 text-emerald-400" />
+                        <span className="text-emerald-400 text-xs font-medium">
+                          已推送至指挥中心
+                        </span>
+                        <span className="text-slate-500 text-xs">
+                          {new Date(record.pushedAt).toLocaleString('zh-CN')}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </Card>
+          )}
 
-            <Card title="R0 变化趋势" className="lg:col-span-1">
-              <R0Chart data={task.results.r0Evolution} height={200} />
-            </Card>
+          {task.results && (
+            <>
+              <Card title="感染传播曲线">
+                <InfectionCurveChart data={task.results.timeSeries} height={350} />
+              </Card>
 
-            <Card title="医疗资源占用" className="lg:col-span-1">
-              <ResourceGauge
-                value={task.results.medicalResourceUsage[task.results.medicalResourceUsage.length - 1] || 0}
-              />
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <Card title="关键指标" className="lg:col-span-1">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">峰值感染人数</span>
+                      <span className="text-xl font-bold text-red-400">
+                        {task.results.peakInfection.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">峰值出现时间</span>
+                      <span className="text-xl font-bold text-white">
+                        第 {task.results.peakTime} 天
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">总感染人数</span>
+                      <span className="text-xl font-bold text-orange-400">
+                        {task.results.totalInfected.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg">
+                      <span className="text-slate-400">总康复人数</span>
+                      <span className="text-xl font-bold text-emerald-400">
+                        {task.results.totalRecovered.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card title="R0 变化趋势" className="lg:col-span-1">
+                  <R0Chart data={task.results.r0Evolution} height={200} />
+                </Card>
+
+                <Card title="医疗资源占用" className="lg:col-span-1">
+                  <ResourceGauge
+                    value={task.results.medicalResourceUsage[task.results.medicalResourceUsage.length - 1] || 0}
+                  />
+                </Card>
+              </div>
+            </>
+          )}
+
+          {!task.results && (
+            <Card>
+              <div className="text-center py-16 text-slate-500">
+                <Activity className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                <p className="text-lg">模拟尚未开始</p>
+                <p className="text-sm mt-1">启动模拟后，结果将在此展示</p>
+                {task.status === 'pending_validation' && (
+                  <button
+                    onClick={() => startSimulation(task.id)}
+                    className="mt-6 px-6 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-400 hover:to-blue-500 transition-all"
+                  >
+                    开始模拟
+                  </button>
+                )}
+              </div>
             </Card>
-          </div>
+          )}
         </div>
-      )}
-
-      {activeTab === 'overview' && !task.results && (
-        <Card>
-          <div className="text-center py-16 text-slate-500">
-            <Activity className="w-16 h-16 mx-auto mb-4 opacity-30" />
-            <p className="text-lg">模拟尚未开始</p>
-            <p className="text-sm mt-1">启动模拟后，结果将在此展示</p>
-            {task.status === 'pending_validation' && (
-              <button
-                onClick={() => startSimulation(task.id)}
-                className="mt-6 px-6 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-400 hover:to-blue-500 transition-all"
-              >
-                开始模拟
-              </button>
-            )}
-          </div>
-        </Card>
       )}
 
       {activeTab === 'params' && (

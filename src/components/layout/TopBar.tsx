@@ -77,9 +77,25 @@ export function TopBar() {
           <div className="w-px h-6 bg-slate-700" />
 
           <div className="text-right">
-            <p className="text-white text-sm font-medium">系统运行中</p>
-            <p className="text-slate-400 text-xs">实时数据同步</p>
+            {systemStatus.isPaused ? (
+              <>
+                <p className="text-red-400 text-sm font-medium">系统已暂停</p>
+                <p className="text-red-400/70 text-xs">{systemStatus.pauseReason}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-emerald-400 text-sm font-medium">系统运行中</p>
+                <p className="text-slate-400 text-xs">实时数据同步</p>
+              </>
+            )}
           </div>
+
+          {systemStatus.consecutivePeakDeviations > 0 && !systemStatus.isPaused && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
+              <AlertOctagon className="w-4 h-4 text-yellow-400" />
+              <span className="text-yellow-400 text-sm font-medium">偏差 {systemStatus.consecutivePeakDeviations}/3</span>
+            </div>
+          )}
         </div>
       </div>
     </header>

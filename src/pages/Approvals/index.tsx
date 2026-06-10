@@ -9,6 +9,7 @@ import {
   FileBarChart,
   ChevronDown,
   Filter,
+  Radio,
 } from 'lucide-react';
 import { useTaskStore, useUserStore, useSystemStore } from '../../store';
 import { Card } from '../../components/ui/StatusBadge';
@@ -23,7 +24,7 @@ export default function Approvals() {
   const { showNotification } = useSystemStore();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [approvalComment, setApprovalComment] = useState('');
-  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [filter, setFilter] = useState<'pending' | 'level1_approved' | 'approved' | 'rejected' | 'all'>('pending');
 
   useEffect(() => {
     fetchTasks();
@@ -32,7 +33,8 @@ export default function Approvals() {
   const filteredTasks = tasks.filter((task) => {
     if (filter === 'all') return task.approvalStatus !== 'not_submitted';
     if (filter === 'pending') return task.approvalStatus === 'pending';
-    if (filter === 'approved') return task.approvalStatus === 'level2_approved' || task.approvalStatus === 'level1_approved';
+    if (filter === 'level1_approved') return task.approvalStatus === 'level1_approved';
+    if (filter === 'approved') return task.approvalStatus === 'level2_approved';
     if (filter === 'rejected') return task.approvalStatus === 'rejected';
     return true;
   });
@@ -68,6 +70,14 @@ export default function Approvals() {
     return 1;
   };
 
+  const isPushedToCommandCenter = selectedTask?.approvalHistory.some(
+    (r) => r.pushedToCommandCenter
+  ) || false;
+
+  const pushedRecord = selectedTask?.approvalHistory.find(
+    (r) => r.pushedToCommandCenter
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -93,6 +103,7 @@ export default function Approvals() {
         <div className="flex rounded-lg overflow-hidden border border-slate-700">
           {[
             { value: 'pending', label: '待审批' },
+            { value: 'level1_approved', label: '一级已通过' },
             { value: 'approved', label: '已通过' },
             { value: 'rejected', label: '已驳回' },
             { value: 'all', label: '全部' },
@@ -138,6 +149,8 @@ export default function Approvals() {
                             ? 'bg-yellow-500/20 text-yellow-400'
                             : task.approvalStatus === 'rejected'
                             ? 'bg-red-500/20 text-red-400'
+                            : task.approvalStatus === 'level1_approved'
+                            ? 'bg-blue-500/20 text-blue-400'
                             : 'bg-emerald-500/20 text-emerald-400'
                         }`}
                       >
@@ -197,6 +210,18 @@ export default function Approvals() {
                   </div>
                 </div>
 
+                {isPushedToCommandCenter && (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                    <Radio className="w-5 h-5 text-emerald-400" />
+                    <span className="text-emerald-400 font-medium">已推送至指挥中心</span>
+                    {pushedRecord?.pushedAt && (
+                      <span className="text-slate-400 text-sm ml-2">
+                        {new Date(pushedRecord.pushedAt).toLocaleString('zh-CN')}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <h5 className="text-white font-medium mb-3">审批进度</h5>
                   <div className="space-y-3">
@@ -245,6 +270,30 @@ export default function Approvals() {
                         </p>
                       </div>
                     </div>
+
+                    <div className="w-px h-6 bg-slate-700 ml-4" />
+
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                          isPushedToCommandCenter
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-slate-700 text-slate-400'
+                        }`}
+                      >
+                        {isPushedToCommandCenter ? (
+                          <Check className="w-4 h-4" />
+                        ) : (
+                          <Radio className="w-4 h-4" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-white text-sm font-medium">推送指挥中心</p>
+                        <p className="text-slate-500 text-xs">
+                          {isPushedToCommandCenter ? '已推送' : '待推送'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -258,9 +307,20 @@ export default function Approvals() {
                           className="p-3 bg-slate-900/50 rounded-lg"
                         >
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-white text-sm font-medium">
-                              {record.approver}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded font-medium ${
+                                  record.level === 1
+                                    ? 'bg-blue-500/20 text-blue-400'
+                                    : 'bg-purple-500/20 text-purple-400'
+                                }`}
+                              >
+                                {record.level === 1 ? '一级审批' : '二级审批'}
+                              </span>
+                              <span className="text-white text-sm font-medium">
+                                {record.approver}
+                              </span>
+                            </div>
                             <span
                               className={`text-xs px-2 py-0.5 rounded ${
                                 record.status === 'approved'
@@ -276,6 +336,17 @@ export default function Approvals() {
                             <p className="text-slate-500 text-xs mt-1">
                               {new Date(record.approvedAt).toLocaleString('zh-CN')}
                             </p>
+                          )}
+                          {record.pushedToCommandCenter && record.pushedAt && (
+                            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/50">
+                              <Radio className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-400 text-xs font-medium">
+                                已推送至指挥中心
+                              </span>
+                              <span className="text-slate-500 text-xs">
+                                {new Date(record.pushedAt).toLocaleString('zh-CN')}
+                              </span>
+                            </div>
                           )}
                         </div>
                       ))}

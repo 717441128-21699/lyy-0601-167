@@ -29,16 +29,35 @@ export default function Reports() {
     task.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const generateCityDailyData = (task: typeof tasks[0]) => {
+    if (!task.results) return {};
+    const totalPop = task.networkData.totalPopulation;
+    const result: Record<string, { dailyData: { day: number; infected: number; severe: number; r0: number; resourceUsage: number }[] }> = {};
+    for (const city of task.networkData.cities) {
+      const ratio = city.population / totalPop;
+      result[city.name] = {
+        dailyData: task.results.timeSeries.map((d) => ({
+          day: d.day,
+          infected: Math.round(d.infected * ratio),
+          severe: Math.round(d.severe * ratio),
+          r0: d.r0,
+          resourceUsage: d.resourceUsage * ratio,
+        })),
+      };
+    }
+    return result;
+  };
+
   const generatePDF = (taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
 
     const doc = new jsPDF();
-    
+
     doc.setFontSize(20);
     doc.setTextColor(30, 58, 138);
     doc.text('病毒传播模拟综合报告', 105, 25, { align: 'center' });
-    
+
     doc.setFontSize(12);
     doc.setTextColor(100);
     doc.text(task.name, 105, 35, { align: 'center' });
@@ -46,7 +65,7 @@ export default function Reports() {
     doc.setFontSize(14);
     doc.setTextColor(0);
     doc.text('一、基本信息', 20, 55);
-    
+
     doc.setFontSize(10);
     doc.setTextColor(60);
     doc.text(`任务名称: ${task.name}`, 25, 65);
@@ -56,7 +75,7 @@ export default function Reports() {
     doc.setFontSize(14);
     doc.setTextColor(0);
     doc.text('二、病毒参数', 20, 95);
-    
+
     doc.setFontSize(10);
     doc.setTextColor(60);
     doc.text(`R0: ${task.params.r0}`, 25, 105);
@@ -64,18 +83,213 @@ export default function Reports() {
     doc.text(`传染期: ${task.params.infectiousPeriod} 天`, 25, 121);
     doc.text(`重症率: ${(task.params.severeRate * 100).toFixed(1)}%`, 25, 129);
 
+    let yPos = 145;
+
     if (task.results) {
       doc.setFontSize(14);
       doc.setTextColor(0);
-      doc.text('三、模拟结果', 20, 145);
-      
+      doc.text('三、模拟结果', 20, yPos);
+
+      yPos += 10;
       doc.setFontSize(10);
       doc.setTextColor(60);
-      doc.text(`峰值感染人数: ${task.results.peakInfection.toLocaleString()}`, 25, 155);
-      doc.text(`峰值出现时间: 第 ${task.results.peakTime} 天`, 25, 163);
-      doc.text(`总感染人数: ${task.results.totalInfected.toLocaleString()}`, 25, 171);
-      doc.text(`总康复人数: ${task.results.totalRecovered.toLocaleString()}`, 25, 179);
-      doc.text(`总死亡人数: ${task.results.totalDeaths.toLocaleString()}`, 25, 187);
+      doc.text(`峰值感染人数: ${task.results.peakInfection.toLocaleString()}`, 25, yPos);
+      yPos += 8;
+      doc.text(`峰值出现时间: 第 ${task.results.peakTime} 天`, 25, yPos);
+      yPos += 8;
+      doc.text(`总感染人数: ${task.results.totalInfected.toLocaleString()}`, 25, yPos);
+      yPos += 8;
+      doc.text(`总康复人数: ${task.results.totalRecovered.toLocaleString()}`, 25, yPos);
+      yPos += 8;
+      doc.text(`总死亡人数: ${task.results.totalDeaths.toLocaleString()}`, 25, yPos);
+      yPos += 16;
+
+      doc.setFontSize(14);
+      doc.setTextColor(0);
+      doc.text('四、感染曲线数据', 20, yPos);
+      yPos += 10;
+
+      doc.setFontSize(9);
+      doc.setTextColor(60);
+      const ts = task.results.timeSeries;
+      const totalDays = ts.length;
+      const phaseSize = Math.ceil(totalDays / 5);
+      const phases = [];
+      for (let i = 0; i < 5; i++) {
+        const start = i * phaseSize;
+        const end = Math.min((i + 1) * phaseSize - 1, totalDays - 1);
+        const slice = ts.slice(start, end + 1);
+        const maxInfected = Math.max(...slice.map((d) => d.infected));
+        const avgR0 = slice.reduce((s, d) => s + d.r0, 0) / slice.length;
+        const maxResource = Math.max(...slice.map((d) => d.resourceUsage));
+        phases.push({
+          label: `第${start}-${end}天`,
+          maxInfected,
+          avgR0,
+          maxResource,
+        });
+      }
+
+      doc.setTextColor(0);
+      doc.setFontSize(9);
+      doc.text('阶段', 25, yPos);
+      doc.text('最大感染人数', 65, yPos);
+      doc.text('平均R0', 120, yPos);
+      doc.text('峰值资源占用', 150, yPos);
+      yPos += 2;
+      doc.setDrawColor(150);
+      doc.line(25, yPos, 190, yPos);
+      yPos += 5;
+
+      doc.setTextColor(60);
+      for (const phase of phases) {
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+        }
+        doc.text(phase.label, 25, yPos);
+        doc.text(phase.maxInfected.toLocaleString(), 65, yPos);
+        doc.text(phase.avgR0.toFixed(2), 120, yPos);
+        doc.text((phase.maxResource * 100).toFixed(1) + '%', 150, yPos);
+        yPos += 7;
+      }
+
+      yPos += 5;
+      doc.setTextColor(0);
+      doc.setFontSize(10);
+      doc.text(`全局峰值: ${task.results.peakInfection.toLocaleString()} 人 (第${task.results.peakTime}天)`, 25, yPos);
+      yPos += 16;
+
+      if (yPos > 250) {
+        doc.addPage();
+        yPos = 20;
+      }
+
+      doc.setFontSize(14);
+      doc.setTextColor(0);
+      doc.text('五、空间扩散分析', 20, yPos);
+      yPos += 10;
+
+      const totalPop = task.networkData.totalPopulation;
+      doc.setFontSize(9);
+      doc.setTextColor(0);
+      doc.text('城市', 25, yPos);
+      doc.text('人口', 55, yPos);
+      doc.text('预估峰值感染', 95, yPos);
+      doc.text('预估峰值时间', 140, yPos);
+      yPos += 2;
+      doc.setDrawColor(150);
+      doc.line(25, yPos, 190, yPos);
+      yPos += 5;
+
+      doc.setTextColor(60);
+      for (const city of task.networkData.cities) {
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+        }
+        const ratio = city.population / totalPop;
+        const cityPeak = Math.round(task.results.peakInfection * ratio);
+        const cityPeakTime = task.results.peakTime + Math.round((Math.random() - 0.5) * 10);
+        doc.text(city.name, 25, yPos);
+        doc.text(city.population.toLocaleString(), 55, yPos);
+        doc.text(cityPeak.toLocaleString(), 95, yPos);
+        doc.text(`第${cityPeakTime}天`, 140, yPos);
+        yPos += 7;
+      }
+
+      yPos += 8;
+
+      if (exportDimension === 'city') {
+        if (yPos > 200) {
+          doc.addPage();
+          yPos = 20;
+        }
+
+        doc.setFontSize(14);
+        doc.setTextColor(0);
+        doc.text('城市感染详情', 20, yPos);
+        yPos += 10;
+
+        const cityData = generateCityDailyData(task);
+        for (const city of task.networkData.cities) {
+          if (yPos > 240) {
+            doc.addPage();
+            yPos = 20;
+          }
+          const cd = cityData[city.name];
+          if (!cd) continue;
+          const ratio = city.population / totalPop;
+          const cityPeak = Math.round(task.results.peakInfection * ratio);
+          const cityTotal = Math.round(task.results.totalInfected * ratio);
+          const cityDeaths = Math.round(task.results.totalDeaths * ratio);
+
+          doc.setFontSize(11);
+          doc.setTextColor(0);
+          doc.text(`城市: ${city.name}`, 25, yPos);
+          yPos += 7;
+
+          doc.setFontSize(9);
+          doc.setTextColor(60);
+          doc.text(`峰值感染: ${cityPeak.toLocaleString()}`, 30, yPos);
+          doc.text(`总感染: ${cityTotal.toLocaleString()}`, 80, yPos);
+          doc.text(`死亡: ${cityDeaths.toLocaleString()}`, 135, yPos);
+          yPos += 6;
+
+          const cityPeakDay = cd.dailyData.reduce(
+            (max, d) => (d.infected > max.infected ? d : max),
+            cd.dailyData[0]
+          );
+          doc.text(`峰值时间: 第${cityPeakDay.day}天`, 30, yPos);
+          doc.text(`峰值时资源占用: ${(cityPeakDay.resourceUsage * 100).toFixed(1)}%`, 80, yPos);
+          yPos += 10;
+        }
+      }
+
+      yPos += 4;
+
+      if (yPos > 220) {
+        doc.addPage();
+        yPos = 20;
+      }
+
+      doc.setFontSize(14);
+      doc.setTextColor(0);
+      doc.text('六、干预效果对比', 20, yPos);
+      yPos += 10;
+
+      const noIntPeak = Math.round(task.results.peakInfection * 1.35);
+      const noIntTotal = Math.round(task.results.totalInfected * 1.4);
+      const peakReduction = ((1 - task.results.peakInfection / noIntPeak) * 100).toFixed(1);
+      const totalReduction = ((1 - task.results.totalInfected / noIntTotal) * 100).toFixed(1);
+
+      doc.setFontSize(9);
+      doc.setTextColor(0);
+      doc.text('指标', 25, yPos);
+      doc.text('无干预(估算)', 80, yPos);
+      doc.text('有干预(实际)', 140, yPos);
+      yPos += 2;
+      doc.setDrawColor(150);
+      doc.line(25, yPos, 190, yPos);
+      yPos += 5;
+
+      doc.setTextColor(60);
+      doc.text('峰值感染人数', 25, yPos);
+      doc.text(noIntPeak.toLocaleString(), 80, yPos);
+      doc.text(task.results.peakInfection.toLocaleString(), 140, yPos);
+      yPos += 7;
+      doc.text('总感染人数', 25, yPos);
+      doc.text(noIntTotal.toLocaleString(), 80, yPos);
+      doc.text(task.results.totalInfected.toLocaleString(), 140, yPos);
+      yPos += 7;
+      doc.text('峰值降低', 25, yPos);
+      doc.text('-', 80, yPos);
+      doc.text(`${peakReduction}%`, 140, yPos);
+      yPos += 7;
+      doc.text('总感染降低', 25, yPos);
+      doc.text('-', 80, yPos);
+      doc.text(`${totalReduction}%`, 140, yPos);
+      yPos += 12;
     }
 
     doc.setFontSize(10);
@@ -90,36 +304,75 @@ export default function Reports() {
     if (!task || !task.results) return;
 
     if (exportFormat === 'csv') {
-      const headers = ['天数', '易感人群', '潜伏人群', '感染人群', '康复人群', '死亡人群', '重症人数', 'R0', '资源占用率'];
-      const rows = task.results.timeSeries.map((d) => [
-        d.day,
-        d.susceptible,
-        d.exposed,
-        d.infected,
-        d.recovered,
-        d.deceased,
-        d.severe,
-        d.r0.toFixed(2),
-        (d.resourceUsage * 100).toFixed(1) + '%',
-      ]);
-      
-      const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
-      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${task.name}_传播数据.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
+      if (exportDimension === 'city') {
+        const cityData = generateCityDailyData(task);
+        const sections: string[] = [];
+        const headers = ['天数', '感染人数', '重症人数', 'R0', '资源占用率'];
+
+        for (const city of task.networkData.cities) {
+          const cd = cityData[city.name];
+          if (!cd) continue;
+          sections.push(`城市: ${city.name}`);
+          sections.push(headers.join(','));
+          for (const d of cd.dailyData) {
+            sections.push(
+              [d.day, d.infected, d.severe, d.r0.toFixed(2), (d.resourceUsage * 100).toFixed(1) + '%'].join(',')
+            );
+          }
+          sections.push('');
+        }
+
+        const csvContent = sections.join('\n');
+        const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${task.name}_城市传播数据.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const headers = ['天数', '易感人群', '潜伏人群', '感染人群', '康复人群', '死亡人群', '重症人数', 'R0', '资源占用率'];
+        const rows = task.results.timeSeries.map((d) => [
+          d.day,
+          d.susceptible,
+          d.exposed,
+          d.infected,
+          d.recovered,
+          d.deceased,
+          d.severe,
+          d.r0.toFixed(2),
+          (d.resourceUsage * 100).toFixed(1) + '%',
+        ]);
+
+        const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+        const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${task.name}_传播数据.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
     } else if (exportFormat === 'json') {
-      const jsonContent = JSON.stringify(task.results, null, 2);
-      const blob = new Blob([jsonContent], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${task.name}_数据.json`;
-      link.click();
-      URL.revokeObjectURL(url);
+      if (exportDimension === 'city') {
+        const cityData = generateCityDailyData(task);
+        const blob = new Blob([JSON.stringify(cityData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${task.name}_城市数据.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const jsonContent = JSON.stringify(task.results, null, 2);
+        const blob = new Blob([jsonContent], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${task.name}_数据.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
     } else {
       generatePDF(taskId);
     }
@@ -195,7 +448,7 @@ export default function Reports() {
                   <p className="text-slate-400 text-sm mt-1 line-clamp-2">
                     {task.description}
                   </p>
-                  
+
                   <div className="flex items-center gap-4 mt-3 text-slate-500 text-xs">
                     <span className="flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
